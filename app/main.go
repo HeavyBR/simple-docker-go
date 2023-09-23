@@ -12,6 +12,8 @@ func main() {
 	args := os.Args[4:len(os.Args)]
 
 	cmd := exec.Command(command, args...)
+	pipeIO(cmd)
+
 	output, err := cmd.Output()
 	if err != nil {
 		fmt.Printf("Err: %v", err)
@@ -19,4 +21,10 @@ func main() {
 	}
 
 	fmt.Println(string(output))
+}
+
+func pipeIO(cmd *exec.Cmd) {
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 }
