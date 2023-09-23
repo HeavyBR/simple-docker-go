@@ -14,8 +14,7 @@ func main() {
 	cmd := exec.Command(command, args...)
 	pipeIO(cmd)
 
-	_, err := cmd.Output()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		fmt.Printf("Err: %v", err)
 		os.Exit(1)
 	}
