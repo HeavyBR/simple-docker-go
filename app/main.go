@@ -15,15 +15,23 @@ func main() {
 	command := os.Args[3]
 	args := os.Args[4:len(os.Args)]
 
+	// isolateFilesystem will isolate the filesystem with chroot
 	if err := isolateFilesystem(command); err != nil {
 		log.Printf("cannot isolate filesystem, error: %v", err)
 		os.Exit(1)
 	}
 
+	// isolateProcess will isolate the process with unshare
 	if err := isolateProcess(); err != nil {
 		log.Printf("cannot isolate process, error: %v", err)
 		os.Exit(1)
 	}
+
+	// TODO isolate resources with cgroups
+
+	// TODO should I isolate network?
+
+	// TODO should I isolate users?
 
 	// Run the command
 	cmd := exec.Command(command, args...)
