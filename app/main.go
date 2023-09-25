@@ -15,25 +15,17 @@ func main() {
 	command := os.Args[3]
 	args := os.Args[4:len(os.Args)]
 
-	// Create temp dir
-	temp, err := os.MkdirTemp("", "docker")
-	if err != nil {
-		return
-	}
-
-	// Copy the command binary to temp dir
-	if _, err := copy(command, temp+command); err != nil {
-		log.Printf("cannot copy command %s to %s, error: %v", command, temp, err)
+	if err := isolateFilesystem(command); err != nil {
+		log.Printf("cannot isolate filesystem, error: %v", err)
 		os.Exit(1)
 	}
 
-	// Chroot to temp dir
-	if err := syscall.Chroot(temp); err != nil {
-		log.Printf("cannot chroot to %s, error: %v", temp, err)
-		return
+	if err := isolateProcess(); err != nil {
+		log.Printf("cannot isolate process, error: %v", err)
+		os.Exit(1)
 	}
 
-	// Run ./<binaryName> <args>
+	// Run the command
 	cmd := exec.Command(command, args...)
 	pipeIO(cmd)
 
@@ -46,6 +38,40 @@ func main() {
 		log.Printf("cannot run command %s, error: %v", command, err)
 		os.Exit(1)
 	}
+}
+
+func isolateFilesystem(command string) error {
+	// Create temp dir
+	temp, err := os.MkdirTemp("", "docker")
+	if err != nil {
+		return err
+	}
+
+	// Copy the command binary to temp dir
+	if _, err := copy(command, temp+command); err != nil {
+		return fmt.Errorf("cannot copy command %s to %s, error: %v", command, temp, err)
+	}
+
+	// Chroot to temp dir
+	if err := syscall.Chroot(temp); err != nil {
+		return fmt.Errorf("cannot chroot to %s, error: %v", temp, err)
+	}
+
+	return nil
+}
+
+// isolateResources isolates the resources of the process using cgroups
+func isolateResources() error {
+	return nil
+}
+
+func isolateProcess() error {
+	// Unshare
+	if err := syscall.Unshare(syscall.CLONE_NEWNS | syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID); err != nil {
+		return fmt.Errorf("cannot unshare, error: %v", err)
+	}
+
+	return nil
 }
 
 func pipeIO(cmd *exec.Cmd) {
