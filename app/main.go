@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package main
 
 import (
@@ -9,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -41,15 +45,15 @@ type TokenResponse struct {
 
 const (
 	getTokenURL    = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull"
-	getManifestURL = "https://registry-1.docker.io/v2/library/%s/manifests/%s"
-	getLayerURL    = "https://registry-1.docker.io/v2/library/%s/blobs/%s"
+	getManifestURL = "https://registry.hub.docker.com/v2/library/%s/manifests/%s"
+	getLayerURL    = "https://registry.hub.docker.com/v2/library/%s/blobs/%s"
 
 	contentTypeHeader = "application/vnd.docker.distribution.manifest.v2+json"
 )
 
-func getManifest(image, token string) (ManifestResponse, error) {
+func getManifest(image, tag, token string) (ManifestResponse, error) {
 	var manifestResponse ManifestResponse
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(getManifestURL, image, "latest"), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(getManifestURL, image, tag), nil)
 	if err != nil {
 		return manifestResponse, err
 	}
@@ -150,6 +154,19 @@ func extractLayer(src, dest string) error {
 	return nil
 }
 
+func getImageInfo(dockerImage string) (string, string) {
+	image := strings.Split(dockerImage, ":")
+	imageName := "library/" + image[0]
+	var imageTag string
+	if len(image) != 2 {
+		imageTag = "latest"
+	} else {
+		imageTag = image[1]
+	}
+
+	return imageName, imageTag
+}
+
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
 func main() {
 	command := os.Args[3]
@@ -164,21 +181,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	// isolateFilesystem will isolate the filesystem with chroot
-	if err := isolateFilesystem(temp, command); err != nil {
-		log.Printf("cannot isolate filesystem, error: %v", err)
-		os.Exit(1)
-	}
-
+	image, tag := getImageInfo(imageName)
 	// Get token
-	tokenResponse, err := getToken(imageName)
+	tokenResponse, err := getToken(image)
 	if err != nil {
 		log.Printf("cannot get token, error: %v", err)
 		os.Exit(1)
 	}
 
 	// Get manifest
-	manifestResponse, err := getManifest(imageName, tokenResponse.Token)
+	manifestResponse, err := getManifest(imageName, tag, tokenResponse.AccessToken)
 	if err != nil {
 		log.Printf("cannot get manifest, error: %v", err)
 		os.Exit(1)
@@ -193,6 +205,12 @@ func main() {
 	// Extract first layer
 	if err := extractLayer(fmt.Sprintf("%s.tar.gz", manifestResponse.Layers[0].Digest[7:]), temp); err != nil {
 		log.Printf("cannot extract layer, error: %v", err)
+		os.Exit(1)
+	}
+
+	// isolateFilesystem will isolate the filesystem with chroot
+	if err := isolateFilesystem(temp, command); err != nil {
+		log.Printf("cannot isolate filesystem, error: %v", err)
 		os.Exit(1)
 	}
 
@@ -212,6 +230,8 @@ func main() {
 	cmd := exec.Command(command, args...)
 	pipeIO(cmd)
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
+
 	var exitError *exec.ExitError
 	if err := cmd.Run(); err != nil {
 		if errors.As(err, &exitError) {
@@ -224,10 +244,10 @@ func main() {
 }
 
 func isolateFilesystem(dir, command string) error {
-	// Copy the command binary to temp dir
-	if _, err := copy(command, dir+command); err != nil {
-		return fmt.Errorf("cannot copy command %s to %s, error: %v", command, dir, err)
-	}
+	// // Copy the command binary to temp dir
+	// if _, err := copy(command, dir+command); err != nil {
+	// 	return fmt.Errorf("cannot copy command %s to %s, error: %v", command, dir, err)
+	// }
 
 	// Chroot to temp dir
 	if err := syscall.Chroot(dir); err != nil {
@@ -255,6 +275,7 @@ func pipeIO(cmd *exec.Cmd) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
 }
 
 // Copy file from src to dst
